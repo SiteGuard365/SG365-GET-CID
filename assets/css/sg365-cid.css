@@ -1,0 +1,311 @@
+/* ------------------ Existing CID Form & Layout ------------------ */
+.sg365-cid-wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    font-family: Arial, sans-serif;
+}
+
+.sg365-cid-wrap input[type="text"],
+.sg365-cid-wrap input[type="email"] {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+.sg365-cid-box {
+    padding: 12px;
+    border: 1px solid #eaeaea;
+    background: #fafafa;
+    border-radius: 6px;
+}
+
+.sg365-cid-success .sg365-cid-code {
+    display: block;
+    padding: 10px;
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    margin: 8px 0;
+    font-family: monospace;
+    word-break: break-all;
+}
+
+.sg365-cid-error {
+    border-color: #ffd4d4;
+    background: #fff5f5;
+    color: #900;
+}
+
+.sg365-cid-label {
+    font-weight: 600;
+    margin-bottom: 6px;
+    display: block;
+}
+
+.sg365-cid-remaining {
+    margin-top: 8px;
+    color: #666;
+    font-size: 0.95em;
+}
+
+.sg365-cid-history td,
+.sg365-cid-history th {
+    padding: 8px;
+}
+
+/* ------------------ Responsive ------------------ */
+@media (max-width:800px) {
+    .sg365-cid-wrap {
+        padding: 10px;
+    }
+}
+
+/* ------------------ New AJAX Form ------------------ */
+#sg365-cid-limit-ajax {
+    max-width: 720px;
+    margin: 20px auto;
+    font-family: Arial, sans-serif;
+}
+
+#sg365-cid-limit-ajax form {
+    border: 1px solid #eaeaea;
+    padding: 15px;
+    background: #fafafa;
+    border-radius: 6px;
+    margin-bottom: 15px;
+}
+
+#sg365-cid-limit-ajax input[type="text"],
+#sg365-cid-limit-ajax input[type="email"] {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+}
+
+#sg365-cid-limit-ajax button {
+    background-color: #0071a1;
+    color: #fff;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+#sg365-cid-limit-ajax button:hover {
+    background-color: #005f80;
+}
+
+/* ------------------ New CID Limits Table ------------------ */
+#sg365-cid-limit-ajax table,
+.woocommerce-account .sg365-cid-wrap table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 0.95em;
+}
+
+#sg365-cid-limit-ajax th,
+#sg365-cid-limit-ajax td,
+.woocommerce-account .sg365-cid-wrap th,
+.woocommerce-account .sg365-cid-wrap td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+
+#sg365-cid-limit-ajax th,
+.woocommerce-account .sg365-cid-wrap th {
+    background: #f5f5f5;
+    font-weight: 600;
+}
+
+#sg365-cid-limit-ajax tbody tr:nth-child(even),
+.woocommerce-account .sg365-cid-wrap tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+#sg365-cid-limit-ajax tbody tr:hover,
+.woocommerce-account .sg365-cid-wrap tbody tr:hover {
+    background: #f1f1f1;
+}
+
+/* ------------------ Messages ------------------ */
+#sg365-cid-limit-result p {
+    padding: 10px;
+    border-radius: 4px;
+    margin-top: 8px;
+}
+
+#sg365-cid-limit-result p.error {
+    background: #fff5f5;
+    border: 1px solid #ffd4d4;
+    color: #900;
+}
+
+#sg365-cid-limit-result p.success {
+    background: #f0fff0;
+    border: 1px solid #b3e6b3;
+    color: #060;
+}
+
+/* ------------------ Admin Table Safe ------------------ */
+.wp-admin .widefat.sg365-cid-history,
+.wp-admin .widefat.sg365-cid-history th,
+.wp-admin .widefat.sg365-cid-history td {
+    border: 1px solid #ddd;
+    padding: 6px;
+    font-size: 0.9em;
+}
+
+@media (max-width:800px){
+    #sg365-cid-limit-ajax table,
+    .woocommerce-account .sg365-cid-wrap table {
+        font-size: 0.9em;
+    }
+}
+/* ------------------ General wrapper ------------------ */
+.sg365-cid-wrap,
+#sg365-cid-limit-ajax {
+    max-width: 720px;
+    margin: 30px auto;
+    font-family: Arial, sans-serif;
+    padding: 15px;
+    box-sizing: border-box;
+}
+
+/* ------------------ Inputs ------------------ */
+.sg365-cid-wrap input[type="text"],
+.sg365-cid-wrap input[type="email"],
+#sg365-cid-limit-ajax input[type="text"],
+#sg365-cid-limit-ajax input[type="email"] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-sizing: border-box;
+    margin-bottom: 12px;
+    font-size: 0.95em;
+}
+
+/* ------------------ Forms ------------------ */
+.sg365-cid-wrap form,
+#sg365-cid-limit-ajax form {
+    background: #fdfdfd;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+
+/* ------------------ Buttons ------------------ */
+.sg365-cid-wrap button,
+#sg365-cid-limit-ajax button {
+    background-color: #0071a1;
+    color: #fff;
+    border: none;
+    padding: 12px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.3s;
+}
+
+.sg365-cid-wrap button:hover,
+#sg365-cid-limit-ajax button:hover {
+    background-color: #005f80;
+}
+
+/* ------------------ Tables ------------------ */
+#sg365-cid-limit-ajax table,
+.woocommerce-account .sg365-cid-wrap table,
+.wp-admin .widefat.sg365-cid-history {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    font-size: 0.95em;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+
+/* Table Headers */
+#sg365-cid-limit-ajax th,
+.woocommerce-account .sg365-cid-wrap th,
+.wp-admin .widefat.sg365-cid-history th {
+    background: #0071a1;
+    color: #fff;
+    font-weight: 600;
+    padding: 12px 10px;
+    text-align: left;
+}
+
+/* Table Cells */
+#sg365-cid-limit-ajax td,
+.woocommerce-account .sg365-cid-wrap td,
+.wp-admin .widefat.sg365-cid-history td {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+/* Zebra Stripe */
+#sg365-cid-limit-ajax tbody tr:nth-child(even),
+.woocommerce-account .sg365-cid-wrap tbody tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+/* Hover */
+#sg365-cid-limit-ajax tbody tr:hover,
+.woocommerce-account .sg365-cid-wrap tbody tr:hover {
+    background: #e6f7ff;
+}
+
+/* Messages */
+#sg365-cid-limit-result p {
+    padding: 12px;
+    border-radius: 6px;
+    margin-top: 10px;
+    font-size: 0.95em;
+}
+
+#sg365-cid-limit-result p.error {
+    background: #fff5f5;
+    border: 1px solid #ffd4d4;
+    color: #900;
+}
+
+#sg365-cid-limit-result p.success {
+    background: #f0fff0;
+    border: 1px solid #b3e6b3;
+    color: #060;
+}
+
+/* Center AJAX form */
+#sg365-cid-limit-ajax {
+    text-align: center;
+}
+
+#sg365-cid-limit-ajax form {
+    display: inline-block;
+    text-align: left;
+    width: 100%;
+    max-width: 400px;
+}
+
+/* Responsive */
+@media (max-width:800px){
+    .sg365-cid-wrap,
+    #sg365-cid-limit-ajax {
+        padding: 10px;
+    }
+
+    #sg365-cid-limit-ajax table,
+    .woocommerce-account .sg365-cid-wrap table {
+        font-size: 0.9em;
+    }
+}
