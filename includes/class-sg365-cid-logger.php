@@ -104,4 +104,30 @@ class SG365_CID_Logger {
         $query = $wpdb->prepare( "DELETE FROM {$table} WHERE id IN ({$placeholders})", $ids );
         return $wpdb->query( $query );
     }
+
+    /**
+     * Count successful CID generations for a specific order.
+     */
+    public static function count_success_for_order( $order_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        return intval( $wpdb->get_var( $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$table} WHERE order_id = %s AND status = %s",
+            (string) $order_id,
+            'success'
+        ) ) );
+    }
+
+    /**
+     * Fetch the latest success log for an order.
+     */
+    public static function last_success_for_order( $order_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        return $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE order_id = %s AND status = %s ORDER BY created_at DESC LIMIT 1",
+            (string) $order_id,
+            'success'
+        ) );
+    }
 }

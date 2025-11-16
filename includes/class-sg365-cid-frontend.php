@@ -8,6 +8,7 @@ class SG365_CID_Frontend {
     public static function init() {
         add_shortcode( 'sg365_cid_form', array( __CLASS__, 'shortcode_form' ) );
         add_shortcode( 'sg365_cid_history', array( __CLASS__, 'shortcode_history' ) );
+        add_shortcode( 'sg365_cid_limits', array( __CLASS__, 'shortcode_limits' ) );
 
         add_action( 'wp_ajax_sg365_get_cid', array( __CLASS__, 'ajax_get_cid' ) );
         add_action( 'wp_ajax_nopriv_sg365_get_cid', array( __CLASS__, 'ajax_get_cid' ) );
@@ -109,6 +110,99 @@ class SG365_CID_Frontend {
             echo '<tr><td>' . esc_html( $r->created_at ) . '</td><td>' . esc_html( $r->order_id ) . '</td><td>' . esc_html( wp_trim_words( $r->iid, 6, '...' ) ) . '</td><td>' . esc_html( $r->cid ? $r->cid : '-' ) . '</td><td>' . esc_html( $r->status ) . '</td></tr>';
         }
         echo '</tbody></table>';
+        return ob_get_clean();
+    }
+
+    /**
+     * Display a snapshot of CID allowances for the current customer.
+     * Shows recent orders that granted CID allowances plus remaining quota.
+     */
+    public static function shortcode_limits( $atts ) {
+        if ( ! is_user_logged_in() ) {
+            return '<p>' . esc_html__( 'Please log in to see the CID allowance for your recent orders.', 'sg365-cid' ) . '</p>';
+        }
+
+        if ( ! function_exists( 'wc_get_orders' ) ) {
+            return '<p>' . esc_html__( 'WooCommerce is required to list CID allowances.', 'sg365-cid' ) . '</p>';
+        }
+
+        $user_id = get_current_user_id();
+        $orders = wc_get_orders( array(
+            'customer' => $user_id,
+            'limit'    => 15,
+            'orderby'  => 'date',
+            'order'    => 'DESC',
+            'status'   => array( 'processing', 'completed' ),
+        ) );
+
+        if ( empty( $orders ) ) {
+            return '<p>' . esc_html__( 'No qualifying orders were found.', 'sg365-cid' ) . '</p>';
+        }
+
+        $rows = array();
+        foreach ( $orders as $order ) {
+            $order_id  = $order->get_id();
+            $remaining = max( 0, intval( get_post_meta( $order_id, '_sg365_cid_remaining', true ) ) );
+            $used      = SG365_CID_Logger::count_success_for_order( $order_id );
+            $allocated = $remaining + $used;
+            if ( $allocated <= 0 ) {
+                continue; // skip orders that never granted CID allowance
+            }
+
+            $last_log = SG365_CID_Logger::last_success_for_order( $order_id );
+            $rows[]   = array(
+                'order_obj' => $order,
+                'order_id'  => $order_id,
+                'status'    => wc_get_order_status_name( $order->get_status() ),
+                'allocated' => $allocated,
+                'remaining' => $remaining,
+                'last_cid'  => $last_log ? $last_log->cid : '',
+                'last_time' => $last_log ? $last_log->created_at : '',
+            );
+        }
+
+        if ( empty( $rows ) ) {
+            return '<p>' . esc_html__( 'No CID-enabled products were found in your recent orders.', 'sg365-cid' ) . '</p>';
+        }
+
+        ob_start();
+        echo '<div id="sg365-cid-limit-ajax" class="sg365-cid-wrap">';
+        echo '<p>' . esc_html__( 'These orders include products that allow Confirmation ID (CID) requests.', 'sg365-cid' ) . '</p>';
+        echo '<table><thead><tr>';
+        echo '<th>' . esc_html__( 'Order', 'sg365-cid' ) . '</th>';
+        echo '<th>' . esc_html__( 'Status', 'sg365-cid' ) . '</th>';
+        echo '<th>' . esc_html__( 'Total allowance', 'sg365-cid' ) . '</th>';
+        echo '<th>' . esc_html__( 'Remaining', 'sg365-cid' ) . '</th>';
+        echo '<th>' . esc_html__( 'Last CID generated', 'sg365-cid' ) . '</th>';
+        echo '</tr></thead><tbody>';
+        foreach ( $rows as $row ) {
+            $order_label = sprintf( '#%s', esc_html( $row['order_id'] ) );
+            $order_url   = $row['order_obj']->get_view_order_url();
+            if ( $order_url ) {
+                $order_label = '<a href="' . esc_url( $order_url ) . '">' . $order_label . '</a>';
+            }
+
+            if ( $row['last_cid'] ) {
+                $last_cell = sprintf(
+                    '%s<br><small>%s</small>',
+                    esc_html( $row['last_cid'] ),
+                    esc_html( $row['last_time'] )
+                );
+            } else {
+                $last_cell = '<em>' . esc_html__( 'Never generated', 'sg365-cid' ) . '</em>';
+            }
+
+            echo '<tr>';
+            echo '<td>' . wp_kses_post( $order_label ) . '</td>';
+            echo '<td>' . esc_html( $row['status'] ) . '</td>';
+            echo '<td>' . intval( $row['allocated'] ) . '</td>';
+            echo '<td>' . intval( $row['remaining'] ) . '</td>';
+            echo '<td>' . wp_kses_post( $last_cell ) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+        echo '</div>';
+
         return ob_get_clean();
     }
 

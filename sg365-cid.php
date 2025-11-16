@@ -3,7 +3,7 @@
  * Plugin Name: SG365 CID
  * Plugin URI:  https://siteguard365.com/
  * Description: Generate Confirmation IDs (CID) via PIDKey / CIDMS API and integrate with WooCommerce orders.
- * Version:     1.1.0
+ * Version:     1.2.0
  * Author:      siteguard365
  * Author URI:  https://siteguard365.com/
  * Text Domain: sg365-cid
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'SG365_CID_VERSION', '1.1.0' );
+define( 'SG365_CID_VERSION', '1.2.0' );
 define( 'SG365_CID_FILE', __FILE__ );
 define( 'SG365_CID_DIR', plugin_dir_path( __FILE__ ) );
 define( 'SG365_CID_URL', plugin_dir_url( __FILE__ ) );
