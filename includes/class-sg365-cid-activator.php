@@ -5,6 +5,7 @@ class SG365_CID_Activator {
 
     public static function activate() {
         self::create_log_table();
+        self::create_token_table();
         self::set_default_options();
         if ( ! wp_next_scheduled( 'sg365_cid_cron_cleanup' ) ) {
             wp_schedule_event( time() + 3600, 'daily', 'sg365_cid_cron_cleanup' );
@@ -45,7 +46,22 @@ class SG365_CID_Activator {
             'allow_guests' => 0,
             'logs_retention' => 365,
             'enable_captcha' => 0,
+            'get_cid_page_url' => '',
+            'show_order_detail_data' => 0,
         );
         add_option( SG365_CID_OPTION, $defaults );
+        add_option( SG365_CID_LICENSE_OPTION, array(
+            'license_key' => '',
+            'plan'        => 'free',
+            'status'      => 'inactive',
+            'data'        => array(),
+            'checked_at'  => '',
+        ) );
+    }
+
+    protected static function create_token_table() {
+        if ( class_exists( 'SG365_CID_Tokens' ) ) {
+            SG365_CID_Tokens::create_table();
+        }
     }
 }

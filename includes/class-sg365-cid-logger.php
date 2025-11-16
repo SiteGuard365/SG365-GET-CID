@@ -105,6 +105,14 @@ class SG365_CID_Logger {
         return $wpdb->query( $query );
     }
 
+    public static function delete_logs_before_days( $days ) {
+        $days = max( 1, intval( $days ) );
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . $days . ' days' ) );
+        $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE created_at < %s", $cutoff ) );
+    }
+
     /**
      * Count successful CID generations for a specific order.
      */
@@ -129,5 +137,13 @@ class SG365_CID_Logger {
             (string) $order_id,
             'success'
         ) );
+    }
+
+    public static function count_success_since_days( $days ) {
+        $days = max( 1, intval( $days ) );
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . $days . ' days' ) );
+        return intval( $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = %s AND created_at >= %s", 'success', $cutoff ) ) );
     }
 }

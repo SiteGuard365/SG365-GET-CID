@@ -3,7 +3,7 @@ Contributors: siteguard365
 Tags: woocommerce, api, cid, license, confirmation, pidkey, cidms
 Requires at least: 5.0
 Tested up to: 6.6
-Stable tag: 1.2.0
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -16,8 +16,9 @@ SG365 CID gives WooCommerce stores a secure, logged workflow for issuing Microso
 * Secure AJAX CID form with math captcha, rate limiting and API fallback logic.
 * Product-level toggle determines how many CIDs a customer receives per quantity purchased.
 * CID history shortcode for logged-in customers.
-* NEW CID allowance dashboard (`[sg365_cid_limits]`) summarizes each qualifying order, remaining quota and the most recent CID issued.
-* Admin tools include searchable logs, retention controls, inline CID generation and per-order counters stored as post meta.
+* NEW CID allowance dashboard (`[sg365_cid_limits]`) summarizes each qualifying order, remaining quota and the most recent CID issued, and the thank-you message links customers to your configured Get CID page.
+* Admin tools include searchable logs, retention controls, inline CID generation, WooCommerce order detail summaries, per-order counters stored as post meta, and a dedicated Dashboard / Logs / Settings / License menu.
+* Business plan unlocks a license screen plus token creation and management pages so premium customers can receive reusable CID tokens with limits and expiry dates.
 
 === Shortcodes ===
 * `[sg365_cid_form]` – front-end form for customers to request a CID after providing their order ID, email and IID.
@@ -49,6 +50,12 @@ Yes. If a matching order/email/IID already produced a successful CID, the plugin
 4. Admin logs with inline CID generation button.
 
 == Changelog ==
+= 1.3.0 =
+* Added an SG365 CID dashboard, refined settings (masked API key, Get CID page link, order detail summary toggle) and a license screen that validates Premium or Business keys.
+* Added variation-level CID toggles, automatic allowance recalculation, and improved thank you / order detail messaging.
+* Introduced Business token creation + management, including the ability for customers to enter a token instead of an order number on the front-end form and to see remaining token allowances.
+* Enhanced logs (20 entries per page, full IID view, bulk delete older than 1/3/6 months) plus five new math captcha prompts.
+
 = 1.2.0 =
 * Added `[sg365_cid_limits]` shortcode so customers can review their CID allowance and last issued CID per order.
 * New logger helpers power accurate allowance totals (allocated vs. remaining).
@@ -58,5 +65,5 @@ Yes. If a matching order/email/IID already produced a successful CID, the plugin
 * Initial release with PIDKey / CIDMS integration, WooCommerce hooks, logging and customer history.
 
 == Upgrade Notice ==
-= 1.2.0 =
-A CID allowance dashboard is now available via `[sg365_cid_limits]`, and logging improvements were made to support the new view.
+= 1.3.0 =
+New admin dashboard, license manager, thank-you CTA and Business token support were added alongside variation-aware allowances and more powerful logs.
