@@ -7,6 +7,8 @@ class SG365_CID_Admin {
         add_action( 'admin_menu', array( __CLASS__, 'admin_menu' ) );
         add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
         add_action( 'admin_init', array( __CLASS__, 'ensure_token_table' ) );
+        add_action( 'init', array( __CLASS__, 'maybe_schedule_license_cron' ) );
+        add_action( 'sg365_cid_weekly_license_check', array( __CLASS__, 'cron_verify_license' ) );
         add_action( 'admin_post_sg365_cid_verify_license', array( __CLASS__, 'handle_license_form' ) );
         add_action( 'admin_post_sg365_cid_create_token', array( __CLASS__, 'handle_create_token' ) );
         add_action( 'admin_post_sg365_cid_token_action', array( __CLASS__, 'handle_token_action' ) );
@@ -73,7 +75,15 @@ class SG365_CID_Admin {
     }
 
     public static function get_license() {
-        return get_option( SG365_CID_LICENSE_OPTION, array( 'plan' => 'free', 'status' => 'inactive' ) );
+        $defaults = array(
+            'license_key' => '',
+            'plan'        => 'free',
+            'status'      => 'inactive',
+            'data'        => array(),
+            'checked_at'  => '',
+        );
+        $license = get_option( SG365_CID_LICENSE_OPTION, array() );
+        return wp_parse_args( is_array( $license ) ? $license : array(), $defaults );
     }
 
     public static function ensure_token_table() {
@@ -88,18 +98,56 @@ class SG365_CID_Admin {
         }
     }
 
+    public static function maybe_schedule_license_cron() {
+        $license = self::get_license();
+        if ( empty( $license['license_key'] ) ) {
+            self::clear_license_schedule();
+            return;
+        }
+        if ( ! wp_next_scheduled( 'sg365_cid_weekly_license_check' ) ) {
+            wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', 'sg365_cid_weekly_license_check' );
+        }
+    }
+
+    public static function cron_verify_license() {
+        $license = self::get_license();
+        $key = $license['license_key'] ?? '';
+        if ( empty( $key ) ) {
+            self::clear_license_schedule();
+            return;
+        }
+        $result = self::verify_license_remote( $key );
+        if ( is_wp_error( $result ) ) {
+            self::store_inactive_license_record( $key, $result->get_error_message() );
+            return;
+        }
+        update_option( SG365_CID_LICENSE_OPTION, $result );
+    }
+
+    public static function license_status() {
+        $license = self::get_license();
+        return strtolower( $license['status'] ?? 'inactive' );
+    }
+
+    public static function license_is_active() {
+        return 'active' === self::license_status();
+    }
+
     public static function license_plan() {
         $license = self::get_license();
         return $license['plan'] ?? 'free';
     }
 
     public static function license_is_premium() {
+        if ( ! self::license_is_active() ) {
+            return false;
+        }
         $plan = self::license_plan();
         return in_array( $plan, array( 'premium', 'business' ), true );
     }
 
     public static function license_is_business() {
-        return self::license_plan() === 'business';
+        return self::license_is_active() && self::license_plan() === 'business';
     }
     /* fields */
     public static function field_api_key() {
@@ -203,19 +251,41 @@ class SG365_CID_Admin {
     public static function license_page() {
         if ( ! current_user_can( 'manage_options' ) ) return;
         $license = self::get_license();
+        $status = self::license_status();
         $status_msg = '';
         if ( isset( $_GET['license_status'] ) ) {
             if ( 'success' === $_GET['license_status'] ) {
                 $status_msg = '<div class="notice notice-success"><p>License verified successfully.</p></div>';
+            } elseif ( 'warning' === $_GET['license_status'] ) {
+                $status_msg = '<div class="notice notice-warning"><p>The license was synced, but the server marked it as ' . esc_html( $status ) . '. Paid features remain disabled until the status returns to active.</p></div>';
             } elseif ( 'error' === $_GET['license_status'] ) {
                 $error = isset( $_GET['message'] ) ? sanitize_text_field( wp_unslash( $_GET['message'] ) ) : 'Unable to verify license.';
                 $status_msg = '<div class="notice notice-error"><p>' . esc_html( $error ) . '</p></div>';
             }
         }
+
+        $notices = array();
+        if ( in_array( $status, array( 'pending_activation', 'activated' ), true ) ) {
+            $notices[] = array( 'type' => 'warning', 'text' => __( 'This key still needs to be bound to the current domain. Please open https://www.siteguard365.com/contact-us to bind or reset the domain for this license.', 'sg365-cid' ) );
+        }
+        if ( 'expired' === $status ) {
+            $notices[] = array( 'type' => 'error', 'text' => __( 'This license expired. Premium or Business features are disabled until you renew the key at https://www.siteguard365.com/products.', 'sg365-cid' ) );
+        }
+        if ( in_array( $status, array( 'suspended', 'deleted' ), true ) ) {
+            $notices[] = array( 'type' => 'error', 'text' => __( 'This license is suspended. Please contact https://www.siteguard365.com/contact-us for assistance or to request a domain reset.', 'sg365-cid' ) );
+        }
+        if ( $status && 'active' !== $status && empty( $notices ) ) {
+            $notices[] = array( 'type' => 'warning', 'text' => __( 'Paid features stay disabled until the license status returns to active.', 'sg365-cid' ) );
+        }
+
+        $input_type = self::license_is_active() ? 'password' : 'text';
         ?>
         <div class="wrap">
             <h1>SG365 CID License</h1>
             <?php echo wp_kses_post( $status_msg ); ?>
+            <?php foreach ( $notices as $notice ) : ?>
+                <div class="notice notice-<?php echo esc_attr( $notice['type'] ); ?>"><p><?php echo esc_html( $notice['text'] ); ?></p></div>
+            <?php endforeach; ?>
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                 <?php wp_nonce_field( 'sg365_cid_license' ); ?>
                 <input type="hidden" name="action" value="sg365_cid_verify_license" />
@@ -223,29 +293,35 @@ class SG365_CID_Admin {
                     <tr>
                         <th scope="row"><label for="sg365_license_key">License key</label></th>
                         <td>
-                            <input type="text" id="sg365_license_key" name="license_key" class="regular-text" value="<?php echo esc_attr( $license['license_key'] ?? '' ); ?>" placeholder="SG365-XXXXX-XXXXX-XXXXX-XXXXX" />
-                            <p class="description">Enter the Premium or Business key provided by Site Guard 365.</p>
+                            <input type="<?php echo esc_attr( $input_type ); ?>" id="sg365_license_key" name="license_key" class="regular-text" value="<?php echo esc_attr( $license['license_key'] ?? '' ); ?>" placeholder="SG365-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" />
+                            <p class="description">Enter your Premium or Business key and click Verify to sync with Site Guard 365.<?php if ( self::license_is_active() ) : ?> Current key: <?php echo esc_html( self::mask_license_key( $license['license_key'] ?? '' ) ); ?>.<?php endif; ?></p>
                         </td>
                     </tr>
                 </table>
                 <?php submit_button( 'Verify License' ); ?>
             </form>
 
-            <h2>Current status</h2>
+            <h2>Current license status</h2>
             <p><strong>Plan:</strong> <?php echo esc_html( ucfirst( self::license_plan() ) ); ?><br>
             <strong>Status:</strong> <?php echo esc_html( $license['status'] ?? 'inactive' ); ?><br>
             <?php if ( ! empty( $license['data']['activation'] ) ): ?><strong>Activated:</strong> <?php echo esc_html( $license['data']['activation'] ); ?><br><?php endif; ?>
-            <?php if ( ! empty( $license['data']['expiry'] ) ): ?><strong>Expires:</strong> <?php echo esc_html( $license['data']['expiry'] ); ?><br><?php endif; ?>
-            <?php if ( ! empty( $license['data']['plan'] ) ): ?><strong>Server plan:</strong> <?php echo esc_html( ucfirst( $license['data']['plan'] ) ); ?><br><?php endif; ?>
+            <?php if ( ! empty( $license['data']['expiry'] ) ): ?><strong>Expiry date:</strong> <?php echo esc_html( $license['data']['expiry'] ); ?><br><?php endif; ?>
+            <?php if ( isset( $license['data']['months_remaining'] ) && '' !== $license['data']['months_remaining'] ): ?><strong>Months remaining:</strong> <?php echo esc_html( $license['data']['months_remaining'] ); ?><br><?php endif; ?>
+            <?php if ( ! empty( $license['data']['product_id'] ) ): ?><strong>Product ID:</strong> <?php echo esc_html( $license['data']['product_id'] ); ?><br><?php endif; ?>
             <strong>Last checked:</strong> <?php echo esc_html( $license['checked_at'] ?? 'never' ); ?></p>
+            <?php if ( ! empty( $license['data']['message'] ) ): ?>
+                <p><strong>Server message:</strong> <?php echo esc_html( $license['data']['message'] ); ?></p>
+            <?php endif; ?>
 
-            <h2>License API</h2>
-            <p>Every Site Guard 365 plugin must validate against:</p>
-            <ul>
-                <li><code>https://pro.siteguard365.com/wp-json/site-guard-pro/v1/verify</code></li>
-                <li><code>https://pro.siteguard365.com/verify-this-license/&lt;license&gt;</code></li>
-            </ul>
-            <p>We call the REST endpoint automatically with your domain each time you submit the license form and store the JSON response for quick plan detection.</p>
+            <div class="notice notice-info" style="margin-top:20px;">
+                <p><?php esc_html_e( 'The plugin re-checks your license automatically every week (daily schedule) and each time you click Verify License, so suspended or expired keys are revoked quickly.', 'sg365-cid' ); ?></p>
+            </div>
+            <p>
+                <?php esc_html_e( 'Need to renew, upgrade, or reset the domain assigned to this key?', 'sg365-cid' ); ?>
+                <a href="https://www.siteguard365.com/products" target="_blank" rel="noopener">siteguard365.com/products</a>
+                <?php esc_html_e( 'or', 'sg365-cid' ); ?>
+                <a href="https://www.siteguard365.com/contact-us" target="_blank" rel="noopener">siteguard365.com/contact-us</a>.
+            </p>
         </div>
         <?php
     }
@@ -519,28 +595,33 @@ class SG365_CID_Admin {
     public static function handle_license_form() {
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
         check_admin_referer( 'sg365_cid_license' );
-        $key = isset( $_POST['license_key'] ) ? sanitize_text_field( wp_unslash( $_POST['license_key'] ) ) : '';
+        $key = isset( $_POST['license_key'] ) ? self::normalize_license_key( wp_unslash( $_POST['license_key'] ) ) : '';
+        $current = self::get_license();
+
         if ( empty( $key ) ) {
-            update_option( SG365_CID_LICENSE_OPTION, array(
-                'license_key' => '',
-                'plan'        => 'free',
-                'status'      => 'inactive',
-                'data'        => array(),
-                'checked_at'  => current_time( 'mysql' ),
-            ) );
+            self::store_inactive_license_record( '', '' );
+            self::clear_license_schedule();
             wp_safe_redirect( admin_url( 'admin.php?page=sg365-cid-license&license_status=success' ) );
             exit;
+        }
+
+        $is_new_key = empty( $current['license_key'] ) || $current['license_key'] !== $key;
+        if ( $is_new_key ) {
+            self::store_inactive_license_record( $key, __( 'Awaiting verification', 'sg365-cid' ) );
         }
 
         $result = self::verify_license_remote( $key );
         if ( is_wp_error( $result ) ) {
             $msg = rawurlencode( $result->get_error_message() );
+            self::store_inactive_license_record( $key, $result->get_error_message() );
             wp_safe_redirect( admin_url( 'admin.php?page=sg365-cid-license&license_status=error&message=' . $msg ) );
             exit;
         }
 
         update_option( SG365_CID_LICENSE_OPTION, $result );
-        wp_safe_redirect( admin_url( 'admin.php?page=sg365-cid-license&license_status=success' ) );
+        self::maybe_schedule_license_cron();
+        $status_flag = ( 'active' === strtolower( $result['status'] ?? '' ) ) ? 'success' : 'warning';
+        wp_safe_redirect( admin_url( 'admin.php?page=sg365-cid-license&license_status=' . $status_flag ) );
         exit;
     }
 
@@ -551,6 +632,7 @@ class SG365_CID_Admin {
             'body'    => array(
                 'license' => $key,
                 'domain'  => $domain,
+                'product_id' => (int) SG365_CID_PRODUCT_ID,
             ),
         ) );
 
@@ -560,18 +642,32 @@ class SG365_CID_Admin {
 
         $code = wp_remote_retrieve_response_code( $response );
         $body = json_decode( wp_remote_retrieve_body( $response ), true );
-        if ( 200 !== $code || empty( $body ) ) {
+        if ( 200 !== $code || empty( $body ) || empty( $body['status'] ) ) {
             return new WP_Error( 'sg365_license_invalid', __( 'Invalid response from license server', 'sg365-cid' ) );
         }
 
+        if ( ! empty( $body['product_id'] ) && (int) $body['product_id'] !== (int) SG365_CID_PRODUCT_ID ) {
+            return new WP_Error( 'sg365_product_mismatch', __( 'This license belongs to a different Site Guard 365 product. Please enter the key assigned to SG365 CID.', 'sg365-cid' ) );
+        }
+
         $plan = ! empty( $body['plan'] ) ? strtolower( $body['plan'] ) : self::derive_plan_from_key( $key );
-        $status = $body['status'] ?? 'active';
+        $status = strtolower( $body['status'] ?? 'inactive' );
+
+        $data = array(
+            'activation'        => $body['activation'] ?? '',
+            'expiry'            => $body['expiry'] ?? '',
+            'plan'              => $body['plan'] ?? '',
+            'product_id'        => $body['product_id'] ?? '',
+            'months_remaining'  => isset( $body['months_remaining'] ) ? $body['months_remaining'] : '',
+            'message'           => $body['message'] ?? '',
+            'status'            => $body['status'] ?? '',
+        );
 
         return array(
             'license_key' => $key,
             'plan'        => $plan,
             'status'      => $status,
-            'data'        => $body,
+            'data'        => $data,
             'checked_at'  => current_time( 'mysql' ),
         );
     }
@@ -581,6 +677,40 @@ class SG365_CID_Admin {
             return 'business';
         }
         return 'premium';
+    }
+
+    protected static function normalize_license_key( $key ) {
+        $key = strtoupper( trim( (string) $key ) );
+        $key = preg_replace( '/[^A-Z0-9\-]/', '', $key );
+        return $key;
+    }
+
+    protected static function mask_license_key( $key ) {
+        if ( empty( $key ) ) {
+            return '';
+        }
+        if ( stripos( $key, 'SG365-' ) === 0 ) {
+            return 'SG365-XXXXX-XXXXX-XXXXX-XXXXX';
+        }
+        return str_repeat( 'X', min( 10, strlen( $key ) ) );
+    }
+
+    protected static function store_inactive_license_record( $key, $message = '' ) {
+        $data = array();
+        if ( ! empty( $message ) ) {
+            $data['message'] = $message;
+        }
+        update_option( SG365_CID_LICENSE_OPTION, array(
+            'license_key' => $key,
+            'plan'        => 'free',
+            'status'      => 'inactive',
+            'data'        => $data,
+            'checked_at'  => current_time( 'mysql' ),
+        ) );
+    }
+
+    protected static function clear_license_schedule() {
+        wp_clear_scheduled_hook( 'sg365_cid_weekly_license_check' );
     }
 
     public static function token_create_page() {

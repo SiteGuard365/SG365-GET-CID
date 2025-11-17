@@ -10,6 +10,10 @@ class SG365_CID_Activator {
         if ( ! wp_next_scheduled( 'sg365_cid_cron_cleanup' ) ) {
             wp_schedule_event( time() + 3600, 'daily', 'sg365_cid_cron_cleanup' );
         }
+        if ( ! wp_next_scheduled( 'sg365_cid_weekly_license_check' ) ) {
+            $timestamp = time() + DAY_IN_SECONDS;
+            wp_schedule_event( $timestamp, 'daily', 'sg365_cid_weekly_license_check' );
+        }
     }
 
     public static function create_log_table() {
