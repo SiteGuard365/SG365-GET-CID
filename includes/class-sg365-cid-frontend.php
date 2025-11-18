@@ -8,6 +8,7 @@ class SG365_CID_Frontend {
     public static function init() {
         add_shortcode( 'sg365_cid_form', array( __CLASS__, 'shortcode_form' ) );
         add_shortcode( 'sg365_cid_history', array( __CLASS__, 'shortcode_history' ) );
+        add_shortcode( 'sg365_cid_limits', array( __CLASS__, 'shortcode_limits' ) );
 
         add_action( 'wp_ajax_sg365_get_cid', array( __CLASS__, 'ajax_get_cid' ) );
         add_action( 'wp_ajax_nopriv_sg365_get_cid', array( __CLASS__, 'ajax_get_cid' ) );
@@ -27,24 +28,41 @@ class SG365_CID_Frontend {
         $local = array(
             'ajax_url' => admin_url( 'admin-ajax.php' ),
             'nonce'    => wp_create_nonce( 'sg365_cid_request' ),
-            'enable_captcha' => intval( self::get_opts()['enable_captcha'] ?? 0 ),
+            'enable_captcha' => self::should_show_captcha() ? 1 : 0,
         );
         wp_localize_script( 'sg365-cid-js', 'SG365_CID', $local );
     }
 
     public static function get_opts() {
-        return get_option( SG365_CID_OPTION, array() );
+        $defaults = array(
+            'captcha_mode' => 'disabled',
+            'auto_expire_days' => 0,
+        );
+        $opts = get_option( SG365_CID_OPTION, array() );
+        return wp_parse_args( $opts, $defaults );
+    }
+
+    protected static function should_show_captcha() {
+        $opts = self::get_opts();
+        $mode = $opts['captcha_mode'] ?? ( ! empty( $opts['enable_captcha'] ) ? 'all' : 'disabled' );
+        if ( 'all' === $mode ) {
+            return true;
+        }
+        if ( 'guests' === $mode && ! is_user_logged_in() ) {
+            return true;
+        }
+        return false;
     }
 
     public static function shortcode_form( $atts ) {
         $opts = self::get_opts();
         if ( ! is_user_logged_in() && empty( $opts['allow_guests'] ) ) {
-            return '<p>Please log in to request a Confirmation ID.</p>';
+            return '<p>The Get CID form is currently available to signed-in customers only.</p>';
         }
 
         // prepare captcha question if enabled
         $captcha_html = '';
-        if ( ! empty( $opts['enable_captcha'] ) ) {
+        if ( self::should_show_captcha() ) {
             $q = self::random_captcha_question();
             // store in transient keyed to session or cookie
             $cid_token = 'sg365_captcha_' . wp_generate_password( 12, false, false );
@@ -52,12 +70,28 @@ class SG365_CID_Frontend {
             $captcha_html = '<p><label>Verification: <br><strong>' . esc_html( $q['question'] ) . '</strong><br><input type="text" id="sg365_captcha_answer" name="sg365_captcha_answer" placeholder="Answer" required></label><input type="hidden" id="sg365_captcha_token" value="' . esc_attr( $cid_token ) . '"></p>';
         }
 
+        $token_notice = '';
+        if ( is_user_logged_in() && class_exists( 'SG365_CID_Admin' ) && class_exists( 'SG365_CID_Tokens' ) && SG365_CID_Admin::license_is_business() ) {
+            $user = wp_get_current_user();
+            $tokens = SG365_CID_Tokens::tokens_for_email( $user->user_email );
+            if ( $tokens ) {
+                $token_notice .= '<div class="sg365-token-hint"><strong>Your CID tokens:</strong><ul>';
+                foreach ( $tokens as $token ) {
+                    $remaining = SG365_CID_Tokens::remaining( $token );
+                    $label = $token->name ? $token->name : $token->token;
+                    $token_notice .= '<li>' . esc_html( $label ) . ' — ' . intval( $remaining ) . ' pending</li>';
+                }
+                $token_notice .= '</ul></div>';
+            }
+        }
+
         ob_start();
         ?>
         <div id="sg365-cid-app" class="sg365-cid-wrap">
+            <?php echo wp_kses_post( $token_notice ); ?>
             <form id="sg365-cid-form" method="post">
                 <?php wp_nonce_field( 'sg365_cid_request', 'sg365_cid_nonce' ); ?>
-                <p><label>Order Number:<br><input type="text" id="sg365_order_id" name="order_id" placeholder="123456" required></label></p>
+                <p><label>Order Number:<br><input type="text" id="sg365_order_id" name="order_id" placeholder="Order ID or Business token" required></label></p>
                 <p><label>Email:<br><input type="email" id="sg365_email" name="email" placeholder="your-email@domain.com" required></label></p>
                 <p><label>Installation ID:<br><input type="text" id="sg365_iid" name="iid" placeholder="1234567-1234-..." required></label></p>
                 <?php echo $captcha_html; ?>
@@ -87,6 +121,16 @@ class SG365_CID_Frontend {
             array('question'=>'10 - 3 = ?', 'answer'=>'7'),
             array('question'=>'3 * 4 = ?', 'answer'=>'12'),
             array('question'=>'18 / 3 = ?', 'answer'=>'6'),
+            array('question'=>'14 - 9 = ?', 'answer'=>'5'),
+            array('question'=>'4 * 7 = ?', 'answer'=>'28'),
+            array('question'=>'21 / 7 = ?', 'answer'=>'3'),
+            array('question'=>'16 + 9 = ?', 'answer'=>'25'),
+            array('question'=>'30 - 11 = ?', 'answer'=>'19'),
+            array('question'=>'11 + 13 = ?', 'answer'=>'24'),
+            array('question'=>'25 - 9 = ?', 'answer'=>'16'),
+            array('question'=>'9 * 2 = ?', 'answer'=>'18'),
+            array('question'=>'36 / 6 = ?', 'answer'=>'6'),
+            array('question'=>'15 + 18 = ?', 'answer'=>'33'),
         );
     }
 
@@ -97,7 +141,7 @@ class SG365_CID_Frontend {
     }
 
     public static function shortcode_history( $atts ) {
-        if ( ! is_user_logged_in() ) return '<p>Please login to view your CID history.</p>';
+        if ( ! is_user_logged_in() ) return '';
         $user = wp_get_current_user();
         global $wpdb;
         $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
@@ -112,33 +156,220 @@ class SG365_CID_Frontend {
         return ob_get_clean();
     }
 
+    /**
+     * Display a snapshot of CID allowances for the current customer.
+     * Shows recent orders that granted CID allowances plus remaining quota.
+     */
+    public static function shortcode_limits( $atts ) {
+        if ( ! is_user_logged_in() ) {
+            return '';
+        }
+
+        if ( ! function_exists( 'wc_get_orders' ) ) {
+            return '<p>' . esc_html__( 'WooCommerce is required to list CID allowances.', 'sg365-cid' ) . '</p>';
+        }
+
+        $user_id = get_current_user_id();
+        $orders = wc_get_orders( array(
+            'customer' => $user_id,
+            'limit'    => 15,
+            'orderby'  => 'date',
+            'order'    => 'DESC',
+            'status'   => array( 'processing', 'completed' ),
+        ) );
+
+        if ( empty( $orders ) ) {
+            return '<p>' . esc_html__( 'No qualifying orders were found.', 'sg365-cid' ) . '</p>';
+        }
+
+        $rows = array();
+        foreach ( $orders as $order ) {
+            $order_id  = $order->get_id();
+            self::maybe_expire_order_allowance( $order_id );
+            self::sync_order_allowance_from_items( $order );
+            $remaining = max( 0, intval( get_post_meta( $order_id, '_sg365_cid_remaining', true ) ) );
+            $used      = SG365_CID_Logger::count_success_for_order( $order_id );
+            $allocated = $remaining + $used;
+            if ( $allocated <= 0 ) {
+                continue; // skip orders that never granted CID allowance
+            }
+
+            $last_log = SG365_CID_Logger::last_success_for_order( $order_id );
+            $rows[]   = array(
+                'order_obj' => $order,
+                'order_id'  => $order_id,
+                'status'    => wc_get_order_status_name( $order->get_status() ),
+                'allocated' => $allocated,
+                'remaining' => $remaining,
+                'last_cid'  => $last_log ? $last_log->cid : '',
+                'last_time' => $last_log ? $last_log->created_at : '',
+            );
+        }
+
+        if ( empty( $rows ) ) {
+            return '<p>' . esc_html__( 'No CID-enabled products were found in your recent orders.', 'sg365-cid' ) . '</p>';
+        }
+
+        ob_start();
+        echo '<div id="sg365-cid-limit-ajax" class="sg365-cid-wrap">';
+        echo '<p>' . esc_html__( 'These orders include products that allow Confirmation ID (CID) requests.', 'sg365-cid' ) . '</p>';
+        echo '<table><thead><tr>';
+        echo '<th>' . esc_html__( 'Order', 'sg365-cid' ) . '</th>';
+        echo '<th>' . esc_html__( 'Status', 'sg365-cid' ) . '</th>';
+        echo '<th>' . esc_html__( 'Total allowance', 'sg365-cid' ) . '</th>';
+        echo '<th>' . esc_html__( 'Remaining', 'sg365-cid' ) . '</th>';
+        echo '<th>' . esc_html__( 'Last CID generated', 'sg365-cid' ) . '</th>';
+        echo '</tr></thead><tbody>';
+        foreach ( $rows as $row ) {
+            $order_label = sprintf( '#%s', esc_html( $row['order_id'] ) );
+            $order_url   = $row['order_obj']->get_view_order_url();
+            if ( $order_url ) {
+                $order_label = '<a href="' . esc_url( $order_url ) . '">' . $order_label . '</a>';
+            }
+
+            if ( $row['last_cid'] ) {
+                $last_cell = sprintf(
+                    '%s<br><small>%s</small>',
+                    esc_html( $row['last_cid'] ),
+                    esc_html( $row['last_time'] )
+                );
+            } else {
+                $last_cell = '<em>' . esc_html__( 'Never generated', 'sg365-cid' ) . '</em>';
+            }
+
+            echo '<tr>';
+            echo '<td>' . wp_kses_post( $order_label ) . '</td>';
+            echo '<td>' . esc_html( $row['status'] ) . '</td>';
+            echo '<td>' . intval( $row['allocated'] ) . '</td>';
+            echo '<td>' . intval( $row['remaining'] ) . '</td>';
+            echo '<td>' . wp_kses_post( $last_cell ) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+
+        if ( class_exists( 'SG365_CID_Admin' ) && class_exists( 'SG365_CID_Tokens' ) && SG365_CID_Admin::license_is_business() ) {
+            $user = wp_get_current_user();
+            $tokens = SG365_CID_Tokens::tokens_for_email( $user->user_email );
+            if ( $tokens ) {
+                echo '<h3>' . esc_html__( 'Business tokens tied to your email', 'sg365-cid' ) . '</h3>';
+                echo '<table><thead><tr><th>' . esc_html__( 'Token', 'sg365-cid' ) . '</th><th>' . esc_html__( 'Label', 'sg365-cid' ) . '</th><th>' . esc_html__( 'Remaining', 'sg365-cid' ) . '</th><th>' . esc_html__( 'Expiry', 'sg365-cid' ) . '</th></tr></thead><tbody>';
+                foreach ( $tokens as $token ) {
+                    $remaining = SG365_CID_Tokens::remaining( $token );
+                    $expiry = $token->expiry_date ? esc_html( $token->expiry_date ) : esc_html__( 'Lifetime', 'sg365-cid' );
+                    echo '<tr><td><code>' . esc_html( $token->token ) . '</code></td><td>' . esc_html( $token->name ) . '</td><td>' . intval( $remaining ) . '</td><td>' . $expiry . '</td></tr>';
+                }
+                echo '</tbody></table>';
+            }
+        }
+
+        echo '</div>';
+
+        return ob_get_clean();
+    }
+
     public static function allocate_on_order( $order_id ) {
         if ( ! function_exists( 'wc_get_order' ) ) return;
         $order = wc_get_order( $order_id );
         if ( ! $order ) return;
+        self::sync_order_allowance_from_items( $order );
+    }
 
+    protected static function calculate_order_allowance( $order ) {
         $total_allow = 0;
         foreach ( $order->get_items() as $item ) {
             $product = $item->get_product();
-            if ( ! $product ) continue;
-            $enabled = get_post_meta( $product->get_id(), '_sg365_enable_cid', true );
-            if ( $enabled === 'yes' ) {
+            if ( ! $product ) {
+                continue;
+            }
+            $allow = false;
+            $variation_id = $item->get_variation_id();
+            if ( $variation_id ) {
+                $allow = get_post_meta( $variation_id, '_sg365_enable_cid', true ) === 'yes';
+            }
+            if ( ! $allow ) {
+                $allow = get_post_meta( $product->get_id(), '_sg365_enable_cid', true ) === 'yes';
+            }
+            if ( $allow ) {
                 $total_allow += intval( $item->get_quantity() );
             }
         }
+        return $total_allow;
+    }
 
-        if ( $total_allow > 0 ) {
-            update_post_meta( $order_id, '_sg365_cid_remaining', $total_allow );
+    public static function sync_order_allowance_from_items( $order ) {
+        if ( ! class_exists( 'WC_Order' ) || ! $order || ! $order instanceof WC_Order ) {
+            return;
+        }
+        $total_allow = self::calculate_order_allowance( $order );
+        if ( $total_allow <= 0 ) {
+            return;
+        }
+        $order_id = $order->get_id();
+        $allocated = intval( get_post_meta( $order_id, '_sg365_cid_allocated', true ) );
+        $remaining = intval( get_post_meta( $order_id, '_sg365_cid_remaining', true ) );
+        $used = max( 0, $allocated - $remaining );
+
+        if ( $allocated <= 0 ) {
+            $new_remaining = $total_allow;
+            if ( $used > 0 ) {
+                $new_remaining = max( 0, $total_allow - $used );
+            }
+            update_post_meta( $order_id, '_sg365_cid_allocated', $total_allow );
+            update_post_meta( $order_id, '_sg365_cid_remaining', $new_remaining );
+        } elseif ( $total_allow > $allocated ) {
+            $new_remaining = max( 0, $total_allow - $used );
+            update_post_meta( $order_id, '_sg365_cid_allocated', $total_allow );
+            update_post_meta( $order_id, '_sg365_cid_remaining', $new_remaining );
+        }
+
+        if ( ! get_post_meta( $order_id, '_sg365_cid_last_activity', true ) ) {
+            update_post_meta( $order_id, '_sg365_cid_last_activity', current_time( 'timestamp' ) );
+        }
+    }
+
+    public static function maybe_expire_order_allowance( $order_id ) {
+        $opts = self::get_opts();
+        $days = intval( $opts['auto_expire_days'] ?? 0 );
+        if ( $days <= 0 ) {
+            return;
+        }
+        $last_activity = intval( get_post_meta( $order_id, '_sg365_cid_last_activity', true ) );
+        if ( ! $last_activity && function_exists( 'wc_get_order' ) ) {
+            $order = wc_get_order( $order_id );
+            if ( $order && $order->get_date_created() ) {
+                $last_activity = $order->get_date_created()->getTimestamp();
+            }
+        }
+        if ( $last_activity && ( current_time( 'timestamp' ) - $last_activity ) > ( $days * DAY_IN_SECONDS ) ) {
+            update_post_meta( $order_id, '_sg365_cid_remaining', 0 );
         }
     }
 
     /* Show CID limit on thank you / order details */
     public static function show_order_cid_info( $order_id ) {
         if ( empty( $order_id ) ) return;
+        $opts = self::get_opts();
+        if ( function_exists( 'wc_get_order' ) ) {
+            $order = wc_get_order( $order_id );
+            if ( $order ) {
+                self::maybe_expire_order_allowance( $order_id );
+                self::sync_order_allowance_from_items( $order );
+            }
+        }
         $remaining = intval( get_post_meta( $order_id, '_sg365_cid_remaining', true ) );
+        $allocated = intval( get_post_meta( $order_id, '_sg365_cid_allocated', true ) );
+        if ( $allocated <= 0 ) {
+            $allocated = $remaining;
+        }
         if ( $remaining > 0 ) {
             echo '<div class="sg365-order-cid-info" style="margin:1em 0;padding:12px;border:1px dashed #ddd;background:#f9f9f9;">';
             echo '<strong>Confirmation ID allowance for this order:</strong> ' . intval( $remaining ) . ' request(s) available.';
+            if ( $allocated > 0 ) {
+                echo '<br><small>Total allowance: ' . intval( $allocated ) . '.</small>';
+            }
+            if ( ! empty( $opts['get_cid_page_url'] ) ) {
+                echo '<p style="margin-top:10px;">Please visit this page to generate Confirmation ID:<br><a class="button" href="' . esc_url( $opts['get_cid_page_url'] ) . '">Open Get CID page</a></p>';
+            }
             echo '</div>';
         } else {
             // show 0 or no message
@@ -167,6 +398,32 @@ class SG365_CID_Frontend {
             wp_send_json( array( 'error' => 'Please log in to request CID.' ) );
         }
 
+        $token_row = null;
+        $virtual_order_id = $order_id;
+        if ( class_exists( 'SG365_CID_Admin' ) && SG365_CID_Admin::license_is_business() ) {
+            $token_row = SG365_CID_Tokens::get_token_by_code( $order_id );
+            if ( $token_row ) {
+                $virtual_order_id = 'token:' . $token_row->token;
+            }
+        }
+
+        // captcha if enabled
+        if ( self::should_show_captcha() ) {
+            if ( empty( $captcha_token ) || empty( $captcha_answer ) ) {
+                wp_send_json( array( 'error' => 'Captcha required.' ) );
+            }
+            $stored = get_transient( $captcha_token );
+            if ( ! $stored || ! is_array( $stored ) ) wp_send_json( array( 'error' => 'Invalid or expired captcha.' ) );
+            if ( trim( $captcha_answer ) !== trim( $stored['answer'] ) ) wp_send_json( array( 'error' => 'Captcha answer incorrect.' ) );
+            // clear transient
+            delete_transient( $captcha_token );
+        }
+
+        if ( $token_row ) {
+            self::process_token_request( $token_row, $virtual_order_id, $email, $iid, $opts );
+            return;
+        }
+
         if ( ! function_exists( 'wc_get_order' ) ) {
             wp_send_json( array( 'error' => 'WooCommerce not active.' ) );
         }
@@ -175,6 +432,9 @@ class SG365_CID_Frontend {
         if ( ! $order ) {
             wp_send_json( array( 'error' => 'Order not found.' ) );
         }
+
+        self::maybe_expire_order_allowance( $order_id );
+        self::sync_order_allowance_from_items( $order );
 
         // check email matches order
         $order_email = $order->get_billing_email();
@@ -185,18 +445,6 @@ class SG365_CID_Frontend {
         $allowed_statuses = array( 'completed', 'processing' );
         if ( ! in_array( $order->get_status(), $allowed_statuses, true ) ) {
             wp_send_json( array( 'error' => 'Order status does not allow CID requests (needs to be completed or processing).' ) );
-        }
-
-        // captcha if enabled
-        if ( ! empty( $opts['enable_captcha'] ) ) {
-            if ( empty( $captcha_token ) || empty( $captcha_answer ) ) {
-                wp_send_json( array( 'error' => 'Captcha required.' ) );
-            }
-            $stored = get_transient( $captcha_token );
-            if ( ! $stored || ! is_array( $stored ) ) wp_send_json( array( 'error' => 'Invalid or expired captcha.' ) );
-            if ( trim( $captcha_answer ) !== trim( $stored['answer'] ) ) wp_send_json( array( 'error' => 'Captcha answer incorrect.' ) );
-            // clear transient
-            delete_transient( $captcha_token );
         }
 
         // If a success CID already exists for this order+email+iid, return it and DO NOT consume limit
@@ -227,7 +475,6 @@ class SG365_CID_Frontend {
         $res = SG365_CID_API::request_cid( $iid );
 
         if ( ! $res['success'] ) {
-            // log error optionally
             SG365_CID_Logger::log_error( array( 'order_id' => $order_id, 'user_id' => $order->get_user_id(), 'email' => $email, 'product_ids' => self::order_product_ids( $order ), 'iid' => $iid, 'api_response' => $res['raw'], 'status' => 'error', 'ip' => $ip ) );
             wp_send_json( array( 'error' => $res['error'], 'step' => 'API request failed' ) );
         }
@@ -235,10 +482,54 @@ class SG365_CID_Frontend {
         // success: decrement remaining and log
         $remaining_after = max( 0, $remaining - 1 );
         update_post_meta( $order_id, '_sg365_cid_remaining', $remaining_after );
+        update_post_meta( $order_id, '_sg365_cid_last_activity', current_time( 'timestamp' ) );
 
         SG365_CID_Logger::log_success( array( 'order_id' => $order_id, 'user_id' => $order->get_user_id(), 'email' => $email, 'product_ids' => self::order_product_ids( $order ), 'iid' => $iid, 'cid' => $res['cid'], 'api_response' => $res['raw'], 'status' => 'success', 'ip' => $ip ) );
 
         wp_send_json( array( 'step' => 'Almost done...', 'cid' => $res['cid'], 'remaining' => $remaining_after ) );
+    }
+
+    protected static function process_token_request( $token_row, $virtual_order_id, $email, $iid, $opts ) {
+        if ( strtolower( $token_row->email ) !== strtolower( $email ) ) {
+            wp_send_json( array( 'error' => 'Email does not match the token assignment.' ) );
+        }
+        if ( 'active' !== $token_row->status ) {
+            wp_send_json( array( 'error' => 'This token is currently suspended.' ) );
+        }
+        if ( SG365_CID_Tokens::is_expired( $token_row ) ) {
+            wp_send_json( array( 'error' => 'This token has expired.' ) );
+        }
+
+        $remaining = SG365_CID_Tokens::remaining( $token_row );
+        if ( $remaining <= 0 ) {
+            wp_send_json( array( 'error' => 'Token has no CID limit remaining.' ) );
+        }
+
+        $existing = SG365_CID_API::find_existing_cid( $virtual_order_id, $email, $iid );
+        if ( $existing ) {
+            wp_send_json( array( 'cid' => $existing->cid, 'remaining' => $remaining, 'message' => 'This Confirmation ID was already generated for this token.' ) );
+        }
+
+        $rate_seconds = max( 1, intval( $opts['rate_limit_seconds'] ?? 30 ) );
+        $ip = SG365_CID_Helpers::get_ip();
+        $token_key = 'sg365_token_rl_' . $token_row->id;
+        if ( get_transient( $token_key ) ) {
+            wp_send_json( array( 'error' => 'Too many requests. Please wait and try again.' ) );
+        }
+        set_transient( $token_key, 1, $rate_seconds );
+
+        $res = SG365_CID_API::request_cid( $iid );
+        if ( ! $res['success'] ) {
+            SG365_CID_Logger::log_error( array( 'order_id' => $virtual_order_id, 'user_id' => null, 'email' => $email, 'product_ids' => null, 'iid' => $iid, 'api_response' => $res['raw'], 'status' => 'error', 'ip' => $ip ) );
+            wp_send_json( array( 'error' => $res['error'], 'step' => 'API request failed' ) );
+        }
+
+        SG365_CID_Tokens::increment_usage( $token_row->id );
+        $remaining_after = max( 0, $remaining - 1 );
+
+        SG365_CID_Logger::log_success( array( 'order_id' => $virtual_order_id, 'user_id' => null, 'email' => $email, 'product_ids' => null, 'iid' => $iid, 'cid' => $res['cid'], 'api_response' => $res['raw'], 'status' => 'success', 'ip' => $ip ) );
+
+        wp_send_json( array( 'cid' => $res['cid'], 'remaining' => $remaining_after, 'token' => $token_row->token ) );
     }
 
     public static function order_product_ids( $order ) {

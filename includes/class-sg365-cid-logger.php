@@ -104,4 +104,77 @@ class SG365_CID_Logger {
         $query = $wpdb->prepare( "DELETE FROM {$table} WHERE id IN ({$placeholders})", $ids );
         return $wpdb->query( $query );
     }
+
+    public static function delete_logs_before_days( $days ) {
+        $days = max( 1, intval( $days ) );
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . $days . ' days' ) );
+        $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE created_at < %s", $cutoff ) );
+    }
+
+    /**
+     * Count successful CID generations for a specific order.
+     */
+    public static function count_success_for_order( $order_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        return intval( $wpdb->get_var( $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$table} WHERE order_id = %s AND status = %s",
+            (string) $order_id,
+            'success'
+        ) ) );
+    }
+
+    /**
+     * Fetch the latest success log for an order.
+     */
+    public static function last_success_for_order( $order_id ) {
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        return $wpdb->get_row( $wpdb->prepare(
+            "SELECT * FROM {$table} WHERE order_id = %s AND status = %s ORDER BY created_at DESC LIMIT 1",
+            (string) $order_id,
+            'success'
+        ) );
+    }
+
+    public static function count_success_since_days( $days ) {
+        $days = max( 1, intval( $days ) );
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . $days . ' days' ) );
+        return intval( $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = %s AND created_at >= %s", 'success', $cutoff ) ) );
+    }
+
+    public static function top_tokens_usage( $days = 30, $limit = 5 ) {
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . max( 1, intval( $days ) ) . ' days' ) );
+        $limit  = max( 1, intval( $limit ) );
+        $pattern = 'token:%';
+        $sql = $wpdb->prepare(
+            "SELECT order_id, COUNT(*) as uses FROM {$table} WHERE status = %s AND created_at >= %s AND order_id LIKE %s GROUP BY order_id ORDER BY uses DESC LIMIT %d",
+            'success',
+            $cutoff,
+            $pattern,
+            $limit
+        );
+        return $wpdb->get_results( $sql );
+    }
+
+    public static function top_orders_usage( $days = 30, $limit = 5 ) {
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . max( 1, intval( $days ) ) . ' days' ) );
+        $limit  = max( 1, intval( $limit ) );
+        $sql = $wpdb->prepare(
+            "SELECT order_id, COUNT(*) as uses FROM {$table} WHERE status = %s AND created_at >= %s AND (order_id IS NOT NULL AND order_id NOT LIKE %s) GROUP BY order_id ORDER BY uses DESC LIMIT %d",
+            'success',
+            $cutoff,
+            'token:%',
+            $limit
+        );
+        return $wpdb->get_results( $sql );
+    }
 }
