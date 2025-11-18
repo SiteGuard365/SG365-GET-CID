@@ -6,7 +6,7 @@ Contributors: siteguard365
 Tags: wooCommerce, api, cid, license, confirmation
 Requires at least: 5.0
 Tested up to: 6.6
-Stable tag: 1.3.1
+Stable tag: 2.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -14,14 +14,15 @@ Generate Confirmation IDs (CID) through PIDKey / CIDMS API and integrate with Wo
 
 ## Features
 
-* **Self-serve CID form** – Customers can safely request their Confirmation ID using `[sg365_cid_form]` with nonce protection, rate limiting, math captcha (optional) and automatic API fallback handling.
+* **Self-serve CID form** – Customers can safely request their Confirmation ID using `[sg365_cid_form]` with nonce protection, rate limiting, math captcha (optional, guest/all-user modes) and automatic API fallback handling.
 * **WooCommerce product link** – Flag specific products as CID-enabled so each order automatically receives an allowance based on the quantity that was purchased.
 * **CID history** – Logged-in customers can review the last 50 Confirmation IDs they generated via `[sg365_cid_history]`.
 * **CID allowance dashboard (new)** – `[sg365_cid_limits]` surfaces every qualifying order, its remaining CID allowance and the last CID that was issued so customers know exactly what they can still redeem.
 * **Admin experience** – Full settings screen, inline CID generator on orders, searchable log viewer with retention controls, WooCommerce order detail summaries and per-order CID counters stored in post meta.
-* **Premium dashboard + license manager** – Dedicated Dashboard / Logs / Settings / License menus highlight usage stats, enforce license status, hide API secrets and add reminders, including a Thank You page CTA that sends users directly to the Get CID page you configure.
-* **License guard (new)** – Product-ID aware license verification masks activated keys, syncs with the Site Guard 365 API at least weekly, and immediately disables premium/business modules when the status changes to pending, suspended, expired or deleted.
-* **Business tokens** – Business license holders can create reusable CID tokens with limits, expiry dates and suspension controls, allow customers to enter those tokens in lieu of an order number, and monitor token usage inside a management table.
+* **Premium dashboard + license manager** – Dedicated Dashboard / Logs / Settings / License menus highlight usage stats, enforce license status, hide API secrets, add reminders, and now surface top tokens/orders plus a thank-you CTA that sends users directly to the Get CID page you configure.
+* **License guard** – Product-ID aware license verification masks activated keys, syncs with the Site Guard 365 API at least weekly, blocks the settings UI when no Premium/Business key is active, and immediately disables premium/business modules when the status changes to pending, suspended, expired or deleted. An inline modal + deactivate button makes managing keys painless.
+* **Business tokens + allowance management** – Business license holders can create reusable CID tokens with limits/expiry/suspension controls, allow customers to enter those tokens in lieu of an order number, monitor token usage inside a management table, and revoke pending order allowances via the CID Allowance Adjuster.
+* **Automated allowance controls** – Auto-expire unused allowances after a configurable number of days, re-sync allowances automatically whenever qualifying items are detected, and review top tokens/orders for the last 30 days from the dashboard.
 * **Product variation support** – Both simple products and variations can unlock CID allowances so every qualifying item automatically grants the right number of CID requests.
 
 ## Shortcodes
@@ -52,6 +53,12 @@ No — per configuration, email notifications are not sent automatically.
 Plugin will attempt a fallback API endpoint (khoatoantin.com) if primary fails.
 
 == Changelog ==
+= 2.0.0 =
+* Locked the SG365 CID settings screen behind an active Premium/Business license (with a built-in license modal + contact button), added a deactivate-license action, and expanded the snapshot so plan/status/expiry/months-remaining/last-checked data is visible everywhere while invalid responses now prompt you to buy a new key.
+* Kept the Create Token and Token Management menus visible for every site but display upgrade prompts when the Business plan is inactive, and introduced a Business-only CID Allowance Adjuster so you can revoke all pending requests or subtract a custom number of requests from any order in seconds.
+* Enhanced the dashboard with top Business tokens and top WooCommerce orders (last 30 days), refreshed the quick-start instructions, and hid the allowance/history shortcode messages for logged-out visitors while the Thank You / View Order screens now push your Get CID page button more prominently.
+* Added an auto-expire option for unused allowances, extra math questions, a guest/all-user captcha toggle, and automatic allowance re-sync/expiration checks so every qualifying order always receives the correct CID limit even if metadata was missing previously.
+
 = 1.3.1 =
 * Updated the license manager to send the SG365 CID product ID with every verification, mask activated keys, display plan/status/expiry guidance, and automatically re-check the key weekly so expired, suspended or domain-reset licenses disable paid features immediately.
 

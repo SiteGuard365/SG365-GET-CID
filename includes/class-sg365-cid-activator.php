@@ -50,6 +50,8 @@ class SG365_CID_Activator {
             'allow_guests' => 0,
             'logs_retention' => 365,
             'enable_captcha' => 0,
+            'captcha_mode' => 'disabled',
+            'auto_expire_days' => 0,
             'get_cid_page_url' => '',
             'show_order_detail_data' => 0,
         );

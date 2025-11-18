@@ -146,4 +146,35 @@ class SG365_CID_Logger {
         $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . $days . ' days' ) );
         return intval( $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = %s AND created_at >= %s", 'success', $cutoff ) ) );
     }
+
+    public static function top_tokens_usage( $days = 30, $limit = 5 ) {
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . max( 1, intval( $days ) ) . ' days' ) );
+        $limit  = max( 1, intval( $limit ) );
+        $pattern = 'token:%';
+        $sql = $wpdb->prepare(
+            "SELECT order_id, COUNT(*) as uses FROM {$table} WHERE status = %s AND created_at >= %s AND order_id LIKE %s GROUP BY order_id ORDER BY uses DESC LIMIT %d",
+            'success',
+            $cutoff,
+            $pattern,
+            $limit
+        );
+        return $wpdb->get_results( $sql );
+    }
+
+    public static function top_orders_usage( $days = 30, $limit = 5 ) {
+        global $wpdb;
+        $table = $wpdb->prefix . SG365_CID_LOG_TABLE;
+        $cutoff = date( 'Y-m-d H:i:s', strtotime( '-' . max( 1, intval( $days ) ) . ' days' ) );
+        $limit  = max( 1, intval( $limit ) );
+        $sql = $wpdb->prepare(
+            "SELECT order_id, COUNT(*) as uses FROM {$table} WHERE status = %s AND created_at >= %s AND (order_id IS NOT NULL AND order_id NOT LIKE %s) GROUP BY order_id ORDER BY uses DESC LIMIT %d",
+            'success',
+            $cutoff,
+            'token:%',
+            $limit
+        );
+        return $wpdb->get_results( $sql );
+    }
 }

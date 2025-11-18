@@ -10,8 +10,10 @@ class SG365_CID_Admin {
         add_action( 'init', array( __CLASS__, 'maybe_schedule_license_cron' ) );
         add_action( 'sg365_cid_weekly_license_check', array( __CLASS__, 'cron_verify_license' ) );
         add_action( 'admin_post_sg365_cid_verify_license', array( __CLASS__, 'handle_license_form' ) );
+        add_action( 'admin_post_sg365_cid_deactivate_license', array( __CLASS__, 'handle_deactivate_license' ) );
         add_action( 'admin_post_sg365_cid_create_token', array( __CLASS__, 'handle_create_token' ) );
         add_action( 'admin_post_sg365_cid_token_action', array( __CLASS__, 'handle_token_action' ) );
+        add_action( 'admin_post_sg365_cid_adjust_allowance', array( __CLASS__, 'handle_adjust_allowance' ) );
 
         add_action( 'woocommerce_product_options_general_product_data', array( __CLASS__, 'product_field' ) );
         add_action( 'woocommerce_process_product_meta', array( __CLASS__, 'save_product_field' ) );
@@ -31,10 +33,11 @@ class SG365_CID_Admin {
         add_submenu_page( 'sg365-cid-dashboard', 'SG365 CID Logs', 'Logs', 'manage_options', 'sg365-cid-logs', array( __CLASS__, 'logs_page' ) );
         add_submenu_page( 'sg365-cid-dashboard', 'Settings', 'Settings', 'manage_options', 'sg365-cid-settings', array( __CLASS__, 'settings_page' ) );
         add_submenu_page( 'sg365-cid-dashboard', 'License', 'License', 'manage_options', 'sg365-cid-license', array( __CLASS__, 'license_page' ) );
+        add_submenu_page( 'sg365-cid-dashboard', 'Create Token', 'Create Business Token', 'manage_options', 'sg365-cid-token-create', array( __CLASS__, 'token_create_page' ) );
+        add_submenu_page( 'sg365-cid-dashboard', 'Token Management', 'Token Management', 'manage_options', 'sg365-cid-token-manage', array( __CLASS__, 'token_manage_page' ) );
 
         if ( self::license_is_business() ) {
-            add_submenu_page( 'sg365-cid-dashboard', 'Create Token', 'Create Token', 'manage_options', 'sg365-cid-token-create', array( __CLASS__, 'token_create_page' ) );
-            add_submenu_page( 'sg365-cid-dashboard', 'Token Management', 'Token Management', 'manage_options', 'sg365-cid-token-manage', array( __CLASS__, 'token_manage_page' ) );
+            add_submenu_page( 'sg365-cid-dashboard', 'CID Allowance Adjuster', 'CID Allowance Adjuster', 'manage_options', 'sg365-cid-adjust', array( __CLASS__, 'allowance_adjust_page' ) );
         }
     }
 
@@ -50,12 +53,17 @@ class SG365_CID_Admin {
         add_settings_field( 'allow_guests', 'Allow guests to use shortcode', array( __CLASS__, 'field_allow_guests' ), 'sg365-cid-settings', 'sg365_cid_main' );
         add_settings_field( 'logs_retention', 'Logs retention (days)', array( __CLASS__, 'field_logs_retention' ), 'sg365-cid-settings', 'sg365_cid_main' );
         add_settings_field( 'enable_captcha', 'Enable Math Captcha', array( __CLASS__, 'field_enable_captcha' ), 'sg365-cid-settings', 'sg365_cid_main' );
+        add_settings_field( 'auto_expire_days', 'Auto expire CID limits', array( __CLASS__, 'field_auto_expire_days' ), 'sg365-cid-settings', 'sg365_cid_main' );
         add_settings_field( 'get_cid_page_url', 'Get CID page link', array( __CLASS__, 'field_get_cid_page' ), 'sg365-cid-settings', 'sg365_cid_main' );
         add_settings_field( 'show_order_detail_data', 'Show data in order details', array( __CLASS__, 'field_show_order_details' ), 'sg365-cid-settings', 'sg365_cid_main' );
     }
 
     public static function sanitize_options( $in ) {
         $current = self::get_opts();
+        if ( ! self::license_is_premium() ) {
+            add_settings_error( 'sg365_cid_group', 'sg365_cid_license_required', __( 'Please activate a Premium or Business license to edit these settings.', 'sg365-cid' ) );
+            return $current;
+        }
         $out = array();
         $out['api_key'] = sanitize_text_field( $in['api_key'] ?? '' );
         $out['primary_api'] = esc_url_raw( $current['primary_api'] ?? 'https://pidkey.com/ajax/cidms_api' );
@@ -64,14 +72,29 @@ class SG365_CID_Admin {
         $out['rate_limit_seconds'] = intval( $in['rate_limit_seconds'] ?? 30 );
         $out['allow_guests'] = ! empty( $in['allow_guests'] ) ? 1 : 0;
         $out['logs_retention'] = intval( $in['logs_retention'] ?? 365 );
-        $out['enable_captcha'] = ! empty( $in['enable_captcha'] ) ? 1 : 0;
+        $mode = isset( $in['captcha_mode'] ) ? sanitize_text_field( $in['captcha_mode'] ) : '';
+        if ( ! $mode && isset( $in['enable_captcha'] ) ) {
+            $mode = ! empty( $in['enable_captcha'] ) ? 'all' : 'disabled';
+        }
+        if ( ! in_array( $mode, array( 'disabled', 'guests', 'all' ), true ) ) {
+            $mode = 'disabled';
+        }
+        $out['enable_captcha'] = ( 'disabled' === $mode ) ? 0 : 1;
+        $out['captcha_mode'] = $mode;
         $out['get_cid_page_url'] = esc_url_raw( $in['get_cid_page_url'] ?? '' );
         $out['show_order_detail_data'] = ! empty( $in['show_order_detail_data'] ) ? 1 : 0;
+        $out['auto_expire_days'] = max( 0, intval( $in['auto_expire_days'] ?? 0 ) );
         return $out;
     }
 
     public static function get_opts() {
-        return get_option( SG365_CID_OPTION, array() );
+        $defaults = array(
+            'captcha_mode' => 'disabled',
+            'enable_captcha' => 0,
+            'auto_expire_days' => 0,
+        );
+        $opts = get_option( SG365_CID_OPTION, array() );
+        return wp_parse_args( $opts, $defaults );
     }
 
     public static function get_license() {
@@ -100,6 +123,8 @@ class SG365_CID_Admin {
 
     public static function maybe_schedule_license_cron() {
         $license = self::get_license();
+        $expiry_dashboard = $license['data']['expiry'] ?? '';
+        $expiry_dashboard = self::is_lifetime_expiry( $expiry_dashboard ) ? __( 'Never', 'sg365-cid' ) : ( $expiry_dashboard ? $expiry_dashboard : __( 'Never', 'sg365-cid' ) );
         if ( empty( $license['license_key'] ) ) {
             self::clear_license_schedule();
             return;
@@ -130,7 +155,15 @@ class SG365_CID_Admin {
     }
 
     public static function license_is_active() {
-        return 'active' === self::license_status();
+        if ( 'active' !== self::license_status() ) {
+            return false;
+        }
+        $license = self::get_license();
+        $expiry  = $license['data']['expiry'] ?? '';
+        if ( $expiry && ! self::is_lifetime_expiry( $expiry ) && self::is_expired_date( $expiry ) ) {
+            return false;
+        }
+        return true;
     }
 
     public static function license_plan() {
@@ -153,6 +186,7 @@ class SG365_CID_Admin {
     public static function field_api_key() {
         $o = self::get_opts();
         printf( '<input type="password" size="60" name="%s[api_key]" value="%s" class="regular-text" autocomplete="off" />', SG365_CID_OPTION, esc_attr( $o['api_key'] ?? '' ) );
+        echo '<p class="description">You can find your API key from here <a href="https://pidkey.com/myaccount" target="_blank" rel="noopener">https://pidkey.com/myaccount</a>.</p>';
     }
     public static function field_primary_api() {
         $o = self::get_opts();
@@ -180,7 +214,23 @@ class SG365_CID_Admin {
     }
     public static function field_enable_captcha() {
         $o = self::get_opts();
-        printf( '<input type="checkbox" name="%s[enable_captcha]" value="1" %s /> Enable math captcha for frontend CID requests (show random math questions).', SG365_CID_OPTION, checked( 1, $o['enable_captcha'] ?? 0, false ) );
+        $mode = $o['captcha_mode'] ?? ( ! empty( $o['enable_captcha'] ) ? 'all' : 'disabled' );
+        $options = array(
+            'disabled' => __( 'Disabled', 'sg365-cid' ),
+            'guests'   => __( 'Only guests must solve math captcha', 'sg365-cid' ),
+            'all'      => __( 'All users must solve math captcha', 'sg365-cid' ),
+        );
+        echo '<select name="' . esc_attr( SG365_CID_OPTION ) . '[captcha_mode]">';
+        foreach ( $options as $value => $label ) {
+            printf( '<option value="%s" %s>%s</option>', esc_attr( $value ), selected( $mode, $value, false ), esc_html( $label ) );
+        }
+        echo '</select>';
+        echo '<p class="description">Rotate 15 math questions to keep bots away. Choose whether only guests or all users must pass the captcha.</p>';
+    }
+
+    public static function field_auto_expire_days() {
+        $o = self::get_opts();
+        printf( '<input type="number" min="0" name="%s[auto_expire_days]" value="%d" /> days <span class="description">0 = never expire automatically.</span>', SG365_CID_OPTION, intval( $o['auto_expire_days'] ?? 0 ) );
     }
 
     public static function field_get_cid_page() {
@@ -196,17 +246,62 @@ class SG365_CID_Admin {
 
     public static function settings_page() {
         if ( ! current_user_can( 'manage_options' ) ) return;
+        $locked = ! self::license_is_premium();
         ?>
-        <div class="wrap">
+        <div class="wrap sg365-settings-wrap <?php echo $locked ? 'sg365-settings-locked' : ''; ?>">
             <h1>SG365 CID Settings</h1>
-            <form method="post" action="options.php">
-                <?php
-                settings_fields( 'sg365_cid_group' );
-                do_settings_sections( 'sg365-cid-settings' );
-                submit_button();
-                ?>
-            </form>
+            <?php if ( $locked ) : ?>
+                <div class="notice notice-warning"><p><?php esc_html_e( 'Please activate a Premium or Business license to access these API settings.', 'sg365-cid' ); ?></p></div>
+                <p><button type="button" class="button button-primary" id="sg365-open-license-modal"><?php esc_html_e( 'Activate license', 'sg365-cid' ); ?></button>
+                <a class="button" href="https://www.siteguard365.com/contact-us" target="_blank" rel="noopener"><?php esc_html_e( 'Contact us if you do not have a license key', 'sg365-cid' ); ?></a></p>
+                <div id="sg365-license-modal" class="sg365-license-modal" style="display:none;">
+                    <div class="sg365-license-modal-inner">
+                        <button type="button" class="sg365-license-close" aria-label="Close">&times;</button>
+                        <h2><?php esc_html_e( 'Activate your SG365 CID license', 'sg365-cid' ); ?></h2>
+                        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                            <?php wp_nonce_field( 'sg365_cid_license' ); ?>
+                            <input type="hidden" name="action" value="sg365_cid_verify_license" />
+                            <p>
+                                <label for="sg365-lock-license-key"><?php esc_html_e( 'License key', 'sg365-cid' ); ?></label><br>
+                                <input type="text" class="regular-text" id="sg365-lock-license-key" name="license_key" placeholder="SG365-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" />
+                            </p>
+                            <?php submit_button( __( 'Verify License', 'sg365-cid' ) ); ?>
+                        </form>
+                    </div>
+                </div>
+            <?php endif; ?>
+            <div class="sg365-options-form <?php echo $locked ? 'sg365-options-disabled' : ''; ?>">
+                <form method="post" action="options.php">
+                    <?php
+                    settings_fields( 'sg365_cid_group' );
+                    do_settings_sections( 'sg365-cid-settings' );
+                    if ( ! $locked ) {
+                        submit_button();
+                    }
+                    ?>
+                </form>
+            </div>
         </div>
+        <style>
+            .sg365-options-disabled { pointer-events:none; filter:blur(2px); opacity:0.5; }
+            .sg365-license-modal { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:1000; }
+            .sg365-license-modal-inner { background:#fff; max-width:480px; margin:10% auto; padding:30px; position:relative; }
+            .sg365-license-close { position:absolute; top:10px; right:10px; background:none; border:0; font-size:24px; cursor:pointer; }
+        </style>
+        <script>
+        (function(){
+            const modal = document.getElementById('sg365-license-modal');
+            const openBtn = document.getElementById('sg365-open-license-modal');
+            if (openBtn && modal) {
+                const closeBtn = modal.querySelector('.sg365-license-close');
+                openBtn.addEventListener('click', function(){ modal.style.display = 'block'; });
+                if (closeBtn) {
+                    closeBtn.addEventListener('click', function(){ modal.style.display = 'none'; });
+                }
+                modal.addEventListener('click', function(e){ if (e.target === modal) modal.style.display = 'none'; });
+            }
+        })();
+        </script>
         <?php
     }
 
@@ -215,6 +310,8 @@ class SG365_CID_Admin {
         $seven  = SG365_CID_Logger::count_success_since_days( 7 );
         $thirty = SG365_CID_Logger::count_success_since_days( 30 );
         $half   = SG365_CID_Logger::count_success_since_days( 180 );
+        $top_tokens = SG365_CID_Logger::top_tokens_usage( 30, 5 );
+        $top_orders = SG365_CID_Logger::top_orders_usage( 30, 5 );
         $license = self::get_license();
         ?>
         <div class="wrap">
@@ -226,16 +323,27 @@ class SG365_CID_Admin {
             </div>
 
             <h2 style="margin-top:40px;">License snapshot</h2>
-            <p><strong>Plan:</strong> <?php echo esc_html( ucfirst( self::license_plan() ) ); ?> &mdash; <strong>Status:</strong> <?php echo esc_html( $license['status'] ?? 'inactive' ); ?><?php if ( ! empty( $license['data']['expiry'] ) ): ?> &mdash; <strong>Expires:</strong> <?php echo esc_html( $license['data']['expiry'] ); ?><?php endif; ?></p>
+            <p><strong>Plan:</strong> <?php echo esc_html( ucfirst( self::license_plan() ) ); ?> &mdash; <strong>Status:</strong> <?php echo esc_html( $license['status'] ?? 'inactive' ); ?> &mdash; <strong>Expires:</strong> <?php echo esc_html( $expiry_dashboard ); ?></p>
 
             <h2>Plugin quick instructions</h2>
             <ol>
-                <li>Mark each product or variation that should grant CID limits using the product checkbox.</li>
-                <li>Completed or processing orders automatically inherit the allowance equal to the purchased quantity.</li>
-                <li>Use the Logs tab to review the last 20 CID requests per page or bulk delete older entries.</li>
-                <li>Configure the Get CID page link plus access rules from the Settings tab.</li>
-                <li>Upgrade with a premium/business license to unlock order detail summaries and token automation.</li>
+                <li><strong>Enable CID products:</strong> open any product or variation and tick “Enable CID limit” so completed orders immediately unlock allowances.</li>
+                <li><strong>Guide customers:</strong> add your “Get CID” page link in Settings so the thank you and order screens always promote the generator button.</li>
+                <li><strong>Monitor demand:</strong> refresh the Logs tab (20 rows per page) to confirm IID submissions, bulk delete old data, or troubleshoot rate limits.</li>
+                <li><strong>Show order insights:</strong> Premium plans surface allowance summaries directly inside each WooCommerce order when “Show data in order details” is enabled.</li>
+                <li><strong>Reward Business clients:</strong> Activate a Business license to create reusable CID tokens, adjust allowances, and unlock the CID Allowance Adjuster.</li>
             </ol>
+
+            <div style="display:flex;gap:40px;flex-wrap:wrap;">
+                <div style="flex:1 1 320px;">
+                    <h3>Top Business tokens (last 30 days)</h3>
+                    <?php echo self::render_top_tokens_table( $top_tokens ); ?>
+                </div>
+                <div style="flex:1 1 320px;">
+                    <h3>Top orders consuming CID (last 30 days)</h3>
+                    <?php echo self::render_top_orders_table( $top_orders ); ?>
+                </div>
+            </div>
         </div>
         <?php
     }
@@ -248,10 +356,65 @@ class SG365_CID_Admin {
         );
     }
 
+    protected static function render_top_tokens_table( $rows ) {
+        if ( empty( $rows ) ) {
+            return '<p>' . esc_html__( 'No Business tokens were used in the last 30 days.', 'sg365-cid' ) . '</p>';
+        }
+        $out = '<table class="widefat striped"><thead><tr><th>' . esc_html__( 'Token', 'sg365-cid' ) . '</th><th>' . esc_html__( 'Used', 'sg365-cid' ) . '</th></tr></thead><tbody>';
+        foreach ( $rows as $row ) {
+            $code = str_replace( 'token:', '', (string) $row->order_id );
+            $label = $code;
+            if ( class_exists( 'SG365_CID_Tokens' ) ) {
+                $token_row = SG365_CID_Tokens::get_token_by_code( $code );
+                if ( $token_row && ! empty( $token_row->name ) ) {
+                    $label = esc_html( $token_row->name ) . ' (' . esc_html( $code ) . ')';
+                }
+            }
+            $out .= '<tr><td><code>' . esc_html( $label ) . '</code></td><td>' . intval( $row->uses ) . '</td></tr>';
+        }
+        $out .= '</tbody></table>';
+        return $out;
+    }
+
+    protected static function render_top_orders_table( $rows ) {
+        if ( empty( $rows ) ) {
+            return '<p>' . esc_html__( 'No qualifying orders consumed CID limits in the last 30 days.', 'sg365-cid' ) . '</p>';
+        }
+        $out = '<table class="widefat striped"><thead><tr><th>' . esc_html__( 'Order ID', 'sg365-cid' ) . '</th><th>' . esc_html__( 'Used', 'sg365-cid' ) . '</th></tr></thead><tbody>';
+        foreach ( $rows as $row ) {
+            $order_display = esc_html( $row->order_id );
+            if ( $row->order_id && is_numeric( $row->order_id ) ) {
+                $order_display = '<a href="' . esc_url( admin_url( 'post.php?post=' . intval( $row->order_id ) . '&action=edit' ) ) . '">#' . esc_html( $row->order_id ) . '</a>';
+            }
+            $out .= '<tr><td>' . wp_kses_post( $order_display ) . '</td><td>' . intval( $row->uses ) . '</td></tr>';
+        }
+        $out .= '</tbody></table>';
+        return $out;
+    }
+
+    protected static function is_expired_date( $date_string ) {
+        $timestamp = strtotime( $date_string );
+        if ( ! $timestamp ) {
+            return false;
+        }
+        return $timestamp < current_time( 'timestamp' );
+    }
+
+    protected static function is_lifetime_expiry( $date_string ) {
+        if ( empty( $date_string ) ) {
+            return true;
+        }
+        $normalized = strtolower( trim( $date_string ) );
+        return in_array( $normalized, array( 'never', 'lifetime', '0', '0000-00-00' ), true );
+    }
+
     public static function license_page() {
         if ( ! current_user_can( 'manage_options' ) ) return;
         $license = self::get_license();
         $status = self::license_status();
+        $expiry_value = $license['data']['expiry'] ?? '';
+        $expiry_label = self::is_lifetime_expiry( $expiry_value ) ? __( 'Never', 'sg365-cid' ) : ( $expiry_value ? $expiry_value : __( 'Never', 'sg365-cid' ) );
+        $checked_at = ! empty( $license['checked_at'] ) ? $license['checked_at'] : __( 'Never', 'sg365-cid' );
         $status_msg = '';
         if ( isset( $_GET['license_status'] ) ) {
             if ( 'success' === $_GET['license_status'] ) {
@@ -300,15 +463,21 @@ class SG365_CID_Admin {
                 </table>
                 <?php submit_button( 'Verify License' ); ?>
             </form>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:10px;">
+                <?php wp_nonce_field( 'sg365_cid_deactivate_license' ); ?>
+                <input type="hidden" name="action" value="sg365_cid_deactivate_license" />
+                <?php $deactivate_attr = array( 'onclick' => "return confirm('" . esc_js( __( 'Deactivate the current license on this site?', 'sg365-cid' ) ) . "');" ); ?>
+                <?php submit_button( __( 'Deactivate License', 'sg365-cid' ), 'delete', 'submit', false, $deactivate_attr ); ?>
+            </form>
 
             <h2>Current license status</h2>
             <p><strong>Plan:</strong> <?php echo esc_html( ucfirst( self::license_plan() ) ); ?><br>
             <strong>Status:</strong> <?php echo esc_html( $license['status'] ?? 'inactive' ); ?><br>
             <?php if ( ! empty( $license['data']['activation'] ) ): ?><strong>Activated:</strong> <?php echo esc_html( $license['data']['activation'] ); ?><br><?php endif; ?>
-            <?php if ( ! empty( $license['data']['expiry'] ) ): ?><strong>Expiry date:</strong> <?php echo esc_html( $license['data']['expiry'] ); ?><br><?php endif; ?>
+            <strong>Expiry date:</strong> <?php echo esc_html( $expiry_label ); ?><br>
             <?php if ( isset( $license['data']['months_remaining'] ) && '' !== $license['data']['months_remaining'] ): ?><strong>Months remaining:</strong> <?php echo esc_html( $license['data']['months_remaining'] ); ?><br><?php endif; ?>
             <?php if ( ! empty( $license['data']['product_id'] ) ): ?><strong>Product ID:</strong> <?php echo esc_html( $license['data']['product_id'] ); ?><br><?php endif; ?>
-            <strong>Last checked:</strong> <?php echo esc_html( $license['checked_at'] ?? 'never' ); ?></p>
+            <strong>Last checked:</strong> <?php echo esc_html( $checked_at ); ?></p>
             <?php if ( ! empty( $license['data']['message'] ) ): ?>
                 <p><strong>Server message:</strong> <?php echo esc_html( $license['data']['message'] ); ?></p>
             <?php endif; ?>
@@ -321,6 +490,7 @@ class SG365_CID_Admin {
                 <a href="https://www.siteguard365.com/products" target="_blank" rel="noopener">siteguard365.com/products</a>
                 <?php esc_html_e( 'or', 'sg365-cid' ); ?>
                 <a href="https://www.siteguard365.com/contact-us" target="_blank" rel="noopener">siteguard365.com/contact-us</a>.
+                <?php esc_html_e( 'If you do not have a license key yet, please contact us and we will help you activate one.', 'sg365-cid' ); ?>
             </p>
         </div>
         <?php
@@ -625,6 +795,15 @@ class SG365_CID_Admin {
         exit;
     }
 
+    public static function handle_deactivate_license() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
+        check_admin_referer( 'sg365_cid_deactivate_license' );
+        self::store_inactive_license_record( '', __( 'License deactivated locally.', 'sg365-cid' ) );
+        self::clear_license_schedule();
+        wp_safe_redirect( admin_url( 'admin.php?page=sg365-cid-license&license_status=success' ) );
+        exit;
+    }
+
     protected static function verify_license_remote( $key ) {
         $domain = wp_parse_url( home_url(), PHP_URL_HOST );
         $response = wp_remote_post( 'https://pro.siteguard365.com/wp-json/site-guard-pro/v1/verify', array(
@@ -643,7 +822,7 @@ class SG365_CID_Admin {
         $code = wp_remote_retrieve_response_code( $response );
         $body = json_decode( wp_remote_retrieve_body( $response ), true );
         if ( 200 !== $code || empty( $body ) || empty( $body['status'] ) ) {
-            return new WP_Error( 'sg365_license_invalid', __( 'Invalid response from license server', 'sg365-cid' ) );
+            return new WP_Error( 'sg365_license_invalid', __( 'License is invalid. Please buy a new license and use it.', 'sg365-cid' ) );
         }
 
         if ( ! empty( $body['product_id'] ) && (int) $body['product_id'] !== (int) SG365_CID_PRODUCT_ID ) {
@@ -652,10 +831,17 @@ class SG365_CID_Admin {
 
         $plan = ! empty( $body['plan'] ) ? strtolower( $body['plan'] ) : self::derive_plan_from_key( $key );
         $status = strtolower( $body['status'] ?? 'inactive' );
+        $expiry = $body['expiry'] ?? '';
+        if ( $expiry && ! self::is_lifetime_expiry( $expiry ) && self::is_expired_date( $expiry ) ) {
+            $status = 'expired';
+            if ( empty( $body['message'] ) ) {
+                $body['message'] = __( 'This license expired. Please renew it to continue using premium features.', 'sg365-cid' );
+            }
+        }
 
         $data = array(
             'activation'        => $body['activation'] ?? '',
-            'expiry'            => $body['expiry'] ?? '',
+            'expiry'            => $expiry,
             'plan'              => $body['plan'] ?? '',
             'product_id'        => $body['product_id'] ?? '',
             'months_remaining'  => isset( $body['months_remaining'] ) ? $body['months_remaining'] : '',
@@ -719,7 +905,8 @@ class SG365_CID_Admin {
         <div class="wrap">
             <h1>Create Business Token</h1>
             <?php if ( ! self::license_is_business() ): ?>
-                <div class="notice notice-warning"><p>Activate a Business license to create tokens.</p></div>
+                <div class="notice notice-warning"><p><?php esc_html_e( 'To access this page please upgrade or buy a new license key of Plan: Business.', 'sg365-cid' ); ?></p>
+                <p><a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=sg365-cid-license' ) ); ?>"><?php esc_html_e( 'Open License settings', 'sg365-cid' ); ?></a></p></div>
             <?php else: ?>
                 <?php if ( isset( $_GET['status'] ) && 'created' === $_GET['status'] ): ?>
                     <div class="notice notice-success"><p>Token created successfully.</p></div>
@@ -762,7 +949,8 @@ class SG365_CID_Admin {
         <div class="wrap">
             <h1>Token Management</h1>
             <?php if ( ! self::license_is_business() ): ?>
-                <div class="notice notice-warning"><p>Business license required.</p></div>
+                <div class="notice notice-warning"><p><?php esc_html_e( 'To access this page please upgrade or buy a new license key of Plan: Business.', 'sg365-cid' ); ?></p>
+                <p><a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=sg365-cid-license' ) ); ?>"><?php esc_html_e( 'Open License settings', 'sg365-cid' ); ?></a></p></div>
             <?php else: ?>
                 <?php
                 $search = sanitize_text_field( $_GET['s'] ?? '' );
@@ -842,6 +1030,43 @@ class SG365_CID_Admin {
         <?php
     }
 
+    public static function allowance_adjust_page() {
+        if ( ! current_user_can( 'manage_options' ) ) return;
+        if ( ! self::license_is_business() ) {
+            echo '<div class="wrap"><div class="notice notice-warning"><p>' . esc_html__( 'To access this page please upgrade or buy a new license key of Plan: Business.', 'sg365-cid' ) . '</p></div></div>';
+            return;
+        }
+        $status = sanitize_text_field( $_GET['status'] ?? '' );
+        $message = '';
+        if ( 'success' === $status && ! empty( $_GET['message'] ) ) {
+            $message = '<div class="notice notice-success"><p>' . esc_html( wp_unslash( $_GET['message'] ) ) . '</p></div>';
+        } elseif ( 'error' === $status && ! empty( $_GET['message'] ) ) {
+            $message = '<div class="notice notice-error"><p>' . esc_html( wp_unslash( $_GET['message'] ) ) . '</p></div>';
+        }
+        ?>
+        <div class="wrap">
+            <h1><?php esc_html_e( 'CID Allowance Adjuster', 'sg365-cid' ); ?></h1>
+            <?php echo $message; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+            <p><?php esc_html_e( 'Use this tool to revoke or reduce the remaining CID allowance for a specific order. Enter 0 to expire every pending CID immediately.', 'sg365-cid' ); ?></p>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="sg365-adjust-form">
+                <?php wp_nonce_field( 'sg365_cid_adjust_allowance' ); ?>
+                <input type="hidden" name="action" value="sg365_cid_adjust_allowance" />
+                <table class="form-table">
+                    <tr>
+                        <th scope="row"><label for="sg365-adjust-order">Order ID</label></th>
+                        <td><input type="text" id="sg365-adjust-order" name="order_id" class="regular-text" required placeholder="#1234" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="sg365-adjust-amount">Custom limit to revoke</label></th>
+                        <td><input type="number" id="sg365-adjust-amount" name="revoke_amount" min="0" value="0" /> <span class="description"><?php esc_html_e( '0 = expire all pending CID at once.', 'sg365-cid' ); ?></span></td>
+                    </tr>
+                </table>
+                <?php submit_button( __( 'Update allowance', 'sg365-cid' ) ); ?>
+            </form>
+        </div>
+        <?php
+    }
+
     public static function handle_create_token() {
         if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
         check_admin_referer( 'sg365_cid_token_create' );
@@ -892,6 +1117,46 @@ class SG365_CID_Admin {
         }
 
         wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    public static function handle_adjust_allowance() {
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Unauthorized' );
+        check_admin_referer( 'sg365_cid_adjust_allowance' );
+        if ( ! self::license_is_business() ) wp_die( 'Business license required.' );
+        $order_id = sanitize_text_field( wp_unslash( $_POST['order_id'] ?? '' ) );
+        $lookup_id = preg_replace( '/[^0-9]/', '', $order_id );
+        $amount = max( 0, intval( $_POST['revoke_amount'] ?? 0 ) );
+        $redirect = admin_url( 'admin.php?page=sg365-cid-adjust' );
+        if ( empty( $lookup_id ) || ! function_exists( 'wc_get_order' ) ) {
+            wp_safe_redirect( add_query_arg( array( 'page' => 'sg365-cid-adjust', 'status' => 'error', 'message' => rawurlencode( __( 'Order ID is required.', 'sg365-cid' ) ) ), admin_url( 'admin.php' ) ) );
+            exit;
+        }
+        $order = wc_get_order( $lookup_id );
+        if ( ! $order ) {
+            wp_safe_redirect( add_query_arg( array( 'page' => 'sg365-cid-adjust', 'status' => 'error', 'message' => rawurlencode( __( 'Order not found.', 'sg365-cid' ) ) ), admin_url( 'admin.php' ) ) );
+            exit;
+        }
+
+        if ( method_exists( 'SG365_CID_Frontend', 'sync_order_allowance_from_items' ) ) {
+            SG365_CID_Frontend::sync_order_allowance_from_items( $order );
+        }
+        if ( method_exists( 'SG365_CID_Frontend', 'maybe_expire_order_allowance' ) ) {
+            SG365_CID_Frontend::maybe_expire_order_allowance( $order->get_id() );
+        }
+
+        $remaining = intval( get_post_meta( $order->get_id(), '_sg365_cid_remaining', true ) );
+        if ( $amount <= 0 ) {
+            update_post_meta( $order->get_id(), '_sg365_cid_remaining', 0 );
+            $message = sprintf( __( 'All pending CID were revoked for order #%s.', 'sg365-cid' ), $order->get_id() );
+        } else {
+            $new_remaining = max( 0, $remaining - $amount );
+            update_post_meta( $order->get_id(), '_sg365_cid_remaining', $new_remaining );
+            $message = sprintf( __( 'CID pending allowance updated to %d for order #%s.', 'sg365-cid' ), $new_remaining, $order->get_id() );
+        }
+        update_post_meta( $order->get_id(), '_sg365_cid_last_activity', current_time( 'timestamp' ) );
+
+        wp_safe_redirect( add_query_arg( array( 'page' => 'sg365-cid-adjust', 'status' => 'success', 'message' => rawurlencode( $message ) ), admin_url( 'admin.php' ) ) );
         exit;
     }
 
